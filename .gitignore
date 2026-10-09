@@ -55,6 +55,7 @@ copernicus_secrets.json
 data/downloads/
 data/raw/
 data/cache/
+data/outputs/
 *.SAFE/
 *.zip
 *.tar.gz

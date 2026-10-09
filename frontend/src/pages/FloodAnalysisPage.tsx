@@ -9,27 +9,31 @@ import {
   Search,
   CheckCircle2,
   AlertTriangle,
-  XCircle,
   Cloud,
   Download,
   KeyRound,
-  ShieldAlert,
-  Info,
-  Clock,
-  ExternalLink,
-  ChevronRight
+  FileCheck2,
+  Mountain,
+  Layers,
+  Sparkles,
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 import type { 
   SystemHealth, 
   SatelliteSearchResult, 
   CompatiblePair, 
-  CredentialsStatus 
+  CredentialsStatus,
+  FloodAnalysisResult 
 } from '../types';
 import { 
   searchSatelliteAcquisitions, 
   fetchCredentialsStatus,
-  checkDownloadReadiness 
+  checkDownloadReadiness,
+  triggerFloodAnalysis 
 } from '../services/api';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 interface FloodAnalysisPageProps {
   health: SystemHealth | null;
@@ -40,6 +44,8 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
   const [eventDate, setEventDate] = useState('2026-08-04');
   const [windowDays, setWindowDays] = useState(15);
   const [thresholdDb, setThresholdDb] = useState(-3.2);
+  const [minWaterDb, setMinWaterDb] = useState(-14.0);
+  const [slopeThreshold, setSlopeThreshold] = useState(15.0);
   const [minLon, setMinLon] = useState(85.05);
   const [minLat, setMinLat] = useState(27.75);
   const [maxLon, setMaxLon] = useState(85.25);
@@ -59,9 +65,10 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
   const [downloadChecking, setDownloadChecking] = useState(false);
   const [downloadResult, setDownloadResult] = useState<any | null>(null);
 
-  // Inundation run state
+  // SAR Inundation Execution State
   const [isProcessing, setIsProcessing] = useState(false);
-  const [analysisRan, setAnalysisRan] = useState(false);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<FloodAnalysisResult | null>(null);
 
   // Load credentials status on mount
   useEffect(() => {
@@ -112,12 +119,30 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
     }
   };
 
-  const handleRunAnalysis = () => {
+  const handleRunAnalysis = async () => {
+    if (!selectedPair) return;
     setIsProcessing(true);
-    setTimeout(() => {
+    setProcessingError(null);
+    try {
+      const result = await triggerFloodAnalysis({
+        pre_scene: selectedPair.pre_event_scene,
+        post_scene: selectedPair.post_event_scene,
+        bbox: [minLon, minLat, maxLon, maxLat],
+        parameters: {
+          threshold_db: thresholdDb,
+          min_water_backscatter_db: minWaterDb,
+          slope_threshold_deg: slopeThreshold,
+          filter_kernel_size: 3,
+          min_polygon_pixels: 5,
+        },
+        is_demo: searchResult?.is_demo_fixture ?? health?.demo_mode ?? true,
+      });
+      setAnalysisResult(result);
+    } catch (err: any) {
+      setProcessingError(err.message || 'SAR Inundation processing failed');
+    } finally {
       setIsProcessing(false);
-      setAnalysisRan(true);
-    }, 800);
+    }
   };
 
   return (
@@ -127,10 +152,10 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
             <Radar className="w-6 h-6 text-cyan-400" />
-            <span>Satellite Discovery & Flood Analysis Workspace</span>
+            <span>Sentinel-1 SAR Inundation Extraction Workspace</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Real Copernicus Data Space Ecosystem (CDSE) catalog discovery, SAR orbit geometry compatibility, and change detection.
+            Bi-temporal amplitude change detection, DEM terrain shadow masking, and georeferenced raster/vector generation.
           </p>
         </div>
 
@@ -138,7 +163,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
           {credentialsStatus?.configured ? (
             <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-mono bg-emerald-950/80 border border-emerald-800 text-emerald-300">
               <KeyRound className="w-3.5 h-3.5" />
-              <span>CDSE Auth Configured</span>
+              <span>CDSE Auth: Configured</span>
             </span>
           ) : (
             <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-mono bg-amber-950/80 border border-amber-800 text-amber-300">
@@ -157,12 +182,12 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
           <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-4">
             <h2 className="text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono flex items-center space-x-2">
               <MapPin className="w-4 h-4" />
-              <span>1. Target Area & Flood Event Anchor</span>
+              <span>1. Geographic Area & Flood Anchor</span>
             </h2>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Preset Area of Interest</label>
+                <label className="block text-slate-300 font-medium mb-1">Preset Study Area</label>
                 <select 
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500 font-sans"
                   defaultValue="trishuli"
@@ -231,7 +256,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Window (± Days)</label>
+                  <label className="block text-slate-300 font-medium mb-1">Search Window (± Days)</label>
                   <input
                     type="number"
                     min="2"
@@ -261,7 +286,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                     onChange={(e) => setForceLiveSearch(e.target.checked)}
                     className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-0"
                   />
-                  <span>Force Live Copernicus CDSE OData Query (Bypass Demo Cache)</span>
+                  <span>Force Live Copernicus CDSE Query (Bypass Demo Cache)</span>
                 </label>
               </div>
 
@@ -274,7 +299,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 {isSearching ? (
                   <>
                     <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Querying Copernicus Catalog...</span>
+                    <span>Searching Copernicus Catalog...</span>
                   </>
                 ) : (
                   <>
@@ -294,17 +319,25 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
             </div>
           )}
 
+          {/* Processing Error Notice */}
+          {processingError && (
+            <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-800 text-xs text-rose-200 flex items-start space-x-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{processingError}</span>
+            </div>
+          )}
+
           {/* SAR Change Detection Parameters Card */}
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-3">
+          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-4">
             <h2 className="text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono flex items-center space-x-2">
               <Sliders className="w-4 h-4" />
-              <span>2. Processing Configuration</span>
+              <span>2. Scientific Threshold Parameters</span>
             </h2>
 
             <div className="space-y-3 text-xs">
               <div>
                 <div className="flex justify-between text-slate-300 mb-1">
-                  <span>Amplitude Log-Ratio Threshold (dB)</span>
+                  <span>Log-Ratio Difference Threshold (Δσ°)</span>
                   <span className="font-mono text-cyan-400 font-bold">{thresholdDb} dB</span>
                 </div>
                 <input
@@ -316,18 +349,56 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                   onChange={(e) => setThresholdDb(parseFloat(e.target.value))}
                   className="w-full accent-cyan-500 cursor-pointer"
                 />
+                <span className="text-[10px] text-slate-400">
+                  Strict (-4.0 dB) to Sensitive (-2.5 dB)
+                </span>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-slate-300 mb-1">
+                  <span>Max Post-Event Water Backscatter</span>
+                  <span className="font-mono text-cyan-400 font-bold">{minWaterDb} dB</span>
+                </div>
+                <input
+                  type="range"
+                  min="-20.0"
+                  max="-10.0"
+                  step="0.5"
+                  value={minWaterDb}
+                  onChange={(e) => setMinWaterDb(parseFloat(e.target.value))}
+                  className="w-full accent-cyan-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-slate-300 mb-1">
+                  <span>DEM Slope Shadow Cutoff</span>
+                  <span className="font-mono text-cyan-400 font-bold">{slopeThreshold}°</span>
+                </div>
+                <input
+                  type="range"
+                  min="8.0"
+                  max="30.0"
+                  step="1.0"
+                  value={slopeThreshold}
+                  onChange={(e) => setSlopeThreshold(parseFloat(e.target.value))}
+                  className="w-full accent-cyan-500 cursor-pointer"
+                />
+                <span className="text-[10px] text-slate-400">
+                  Slopes &gt; {slopeThreshold}° excluded to eliminate mountain radar shadows.
+                </span>
               </div>
 
               <div className="p-2.5 rounded bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-                <span className="text-slate-200 font-medium block">Selected Pair Status:</span>
+                <span className="text-slate-200 font-medium block">Active Product Pair for Execution:</span>
                 {selectedPair ? (
-                  <div className="space-y-0.5 text-slate-300">
-                    <div>Level: <strong className={selectedPair.compatibility_level === 'OPTIMAL' ? 'text-emerald-400' : 'text-amber-400'}>{selectedPair.compatibility_level}</strong> (Score: {selectedPair.compatibility_score})</div>
-                    <div>Pre: {selectedPair.pre_event_scene.acquisition_date.split('T')[0]} ({selectedPair.pre_event_scene.orbit_pass})</div>
-                    <div>Post: {selectedPair.post_event_scene.acquisition_date.split('T')[0]} ({selectedPair.post_event_scene.orbit_pass})</div>
+                  <div className="space-y-0.5 text-slate-300 font-mono text-[10.5px]">
+                    <div>Compatibility: <strong className={selectedPair.compatibility_level === 'OPTIMAL' ? 'text-emerald-400' : 'text-amber-400'}>{selectedPair.compatibility_level}</strong></div>
+                    <div>Pre: {selectedPair.pre_event_scene.acquisition_date.split('T')[0]} ({selectedPair.pre_event_scene.orbit_pass}, Track {selectedPair.pre_event_scene.relative_orbit})</div>
+                    <div>Post: {selectedPair.post_event_scene.acquisition_date.split('T')[0]} ({selectedPair.post_event_scene.orbit_pass}, Track {selectedPair.post_event_scene.relative_orbit})</div>
                   </div>
                 ) : (
-                  <span className="italic text-slate-500">Search catalog first to select a compatible pair.</span>
+                  <span className="italic text-slate-500">Run search to select a compatible satellite pair.</span>
                 )}
               </div>
 
@@ -340,12 +411,12 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 {isProcessing ? (
                   <>
                     <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Processing Inundation Extraction...</span>
+                    <span>Executing Inundation Extraction Engine...</span>
                   </>
                 ) : (
                   <>
                     <Play className="w-4 h-4 fill-current" />
-                    <span>Compute Candidate Flood Mask</span>
+                    <span>Generate Flood Extent Raster & Vectors</span>
                   </>
                 )}
               </button>
@@ -353,10 +424,100 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
           </div>
         </div>
 
-        {/* Right Column: Catalog Discovery Results & Map (7 cols) */}
+        {/* Right Column: Catalog Discovery Results & Extent Output (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
+          {/* Analysis Result Output Banner if generated */}
+          {analysisResult && (
+            <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-850 border border-cyan-500/50 p-5 space-y-4 shadow-2xl">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <span className="text-sm font-bold text-white">Flood Extent Analysis Completed</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-950 text-cyan-300 border border-cyan-800">
+                    ID: {analysisResult.analysis_id}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    analysisResult.is_demo_fixture 
+                      ? 'bg-amber-950 text-amber-300 border border-amber-800' 
+                      : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                  }`}>
+                    {analysisResult.is_demo_fixture ? 'DEMO FIXTURE' : 'REAL SATELLITE DERIVED'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Exact Computed Area Metric Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Candidate Flood</span>
+                  <div className="text-xl font-bold font-mono text-cyan-300 mt-1">
+                    {analysisResult.area_statistics.candidate_flood_area_sqkm} km²
+                  </div>
+                  <span className="text-[10.5px] text-slate-500">Inundated pixels</span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Permanent Water</span>
+                  <div className="text-xl font-bold font-mono text-blue-400 mt-1">
+                    {analysisResult.area_statistics.permanent_water_area_sqkm} km²
+                  </div>
+                  <span className="text-[10.5px] text-slate-500">Normal riverbeds</span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Terrain Masked</span>
+                  <div className="text-xl font-bold font-mono text-amber-400 mt-1">
+                    {analysisResult.area_statistics.terrain_masked_area_sqkm} km²
+                  </div>
+                  <span className="text-[10.5px] text-slate-500">DEM slope &gt; {slopeThreshold}°</span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Valid Coverage</span>
+                  <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
+                    {Math.round(analysisResult.area_statistics.valid_coverage_ratio * 100)}%
+                  </div>
+                  <span className="text-[10.5px] text-slate-500">Analyzed sensor grid</span>
+                </div>
+              </div>
+
+              {/* Download Buttons for Generated Files */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-800">
+                <a
+                  href={`${API_BASE}${analysisResult.raster_metadata.geotiff_file}`}
+                  download
+                  className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono flex items-center space-x-1.5 transition-all shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Georeferenced GeoTIFF</span>
+                </a>
+
+                <a
+                  href={`${API_BASE}${analysisResult.raster_metadata.geojson_file}`}
+                  download
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono flex items-center space-x-1.5 transition-all border border-slate-700"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download GeoJSON Layer</span>
+                </a>
+              </div>
+
+              {/* Scientific Warnings from Analysis */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <span className="font-semibold text-slate-300 block">Uncertainty & Caveats:</span>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+                  {analysisResult.warnings_and_uncertainties.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Catalog Search Results Section */}
-          {searchResult ? (
+          {searchResult && (
             <div className="space-y-4">
               {/* Provenance & Mode Banner */}
               <div className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
@@ -387,7 +548,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                   <span className="text-[11px] font-mono text-slate-400">Prioritizes Identical Track & Pass</span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                   {searchResult.sentinel1.compatible_pairs.length === 0 ? (
                     <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-400">
                       No compatible pre- and post-event Sentinel-1 pair found within the selected ±{windowDays} day window.
@@ -495,19 +656,9 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 </div>
               )}
             </div>
-          ) : (
-            /* Prompt to Search */
-            <div className="rounded-xl bg-slate-900 border border-slate-800 p-8 text-center space-y-3">
-              <Satellite className="w-12 h-12 text-cyan-400 mx-auto opacity-70" />
-              <h3 className="text-base font-semibold text-white">No Satellite Search Executed Yet</h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                Click <strong>"Search Satellite Acquisitions"</strong> to discover actual Sentinel-1 SAR and Sentinel-2 optical scenes 
-                over the selected Area of Interest from the Copernicus Data Space Ecosystem.
-              </p>
-            </div>
           )}
 
-          {/* Interactive Map Shell */}
+          {/* Interactive Spatial Canvas */}
           <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shadow-xl">
             <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
               <div className="flex items-center space-x-2">
@@ -519,15 +670,17 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
 
             <div className="relative w-full h-[320px] bg-slate-950 flex items-center justify-center overflow-hidden">
               <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]" />
-              <div className="relative z-10 text-center space-y-2 bg-slate-900/90 p-4 rounded-xl border border-slate-800 max-w-sm backdrop-blur-md">
-                <Radar className="w-7 h-7 text-cyan-400 mx-auto" />
+              <div className="relative z-10 text-center space-y-2 bg-slate-900/90 p-5 rounded-xl border border-slate-800 max-w-sm backdrop-blur-md">
+                <Radar className="w-8 h-8 text-cyan-400 mx-auto" />
                 <h4 className="text-xs font-semibold text-white">
-                  {analysisRan ? 'Flood Extent Mask Generated (14.82 km²)' : 'Spatial View Ready'}
+                  {analysisResult 
+                    ? `Candidate Flood Mask: ${analysisResult.area_statistics.candidate_flood_area_sqkm} km²` 
+                    : 'Spatial View Ready'}
                 </h4>
                 <p className="text-[11px] text-slate-400">
                   {selectedPair 
-                    ? `Configured: ${selectedPair.pre_event_scene.acquisition_date.split('T')[0]} vs ${selectedPair.post_event_scene.acquisition_date.split('T')[0]}`
-                    : 'Awaiting pair selection'}
+                    ? `Pre: ${selectedPair.pre_event_scene.acquisition_date.split('T')[0]} vs Post: ${selectedPair.post_event_scene.acquisition_date.split('T')[0]}`
+                    : 'Search satellite catalog to configure pre/post pair'}
                 </p>
               </div>
             </div>
@@ -567,7 +720,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] space-y-2">
                   <span className="font-semibold text-cyan-300 block">How to configure live downloads:</span>
                   <p className="text-slate-400">
-                    Register a free Copernicus Data Space account at <a href={downloadResult.setup_guide.registration_portal} target="_blank" rel="noreferrer" className="text-cyan-400 underline">{downloadResult.setup_guide.registration_portal}</a> and populate your credentials in your <code>.env</code> file:
+                    Register a free Copernicus Data Space account at <a href={downloadResult.setup_guide.registration_portal || downloadResult.setup_guide.registration_url || 'https://dataspace.copernicus.eu/'} target="_blank" rel="noreferrer" className="text-cyan-400 underline">{downloadResult.setup_guide.registration_portal || downloadResult.setup_guide.registration_url || 'https://dataspace.copernicus.eu/'}</a> and populate your credentials in your <code>.env</code> file:
                   </p>
                   <pre className="bg-slate-900 p-2 rounded text-slate-200 font-mono text-[10px] overflow-x-auto">
 CDSE_USERNAME=your_username

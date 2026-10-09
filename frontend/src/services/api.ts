@@ -2,7 +2,9 @@ import type {
   SystemHealth, 
   ConfigStatus, 
   SatelliteSearchResult, 
-  CredentialsStatus 
+  CredentialsStatus,
+  FloodAnalysisResult,
+  S1Acquisition
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
@@ -90,6 +92,52 @@ export async function checkDownloadReadiness(productId: string): Promise<any> {
   });
   if (!res.ok) {
     throw new Error(`Download check failed with status ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function triggerFloodAnalysis(params: {
+  analysis_id?: string;
+  pre_scene: S1Acquisition;
+  post_scene: S1Acquisition;
+  bbox?: number[];
+  parameters?: {
+    threshold_db?: number;
+    min_water_backscatter_db?: number;
+    slope_threshold_deg?: number;
+    filter_kernel_size?: number;
+    min_polygon_pixels?: number;
+  };
+  is_demo?: boolean;
+}): Promise<FloodAnalysisResult> {
+  const res = await fetch(`${API_BASE}/api/flood/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Analysis execution failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function fetchAnalysisStatus(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/flood/status/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch status for analysis ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAnalysisMetadata(analysisId: string): Promise<FloodAnalysisResult> {
+  const res = await fetch(`${API_BASE}/api/flood/metadata/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch metadata for analysis ${analysisId}`);
   }
   return await res.json();
 }

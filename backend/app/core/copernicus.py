@@ -7,6 +7,8 @@ and download management for Sentinel-1 C-SAR and Sentinel-2 MSI products.
 import os
 import json
 import time
+import zipfile
+import shutil
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -39,6 +41,21 @@ class InvalidCoordinatesError(CopernicusError):
 
 class InvalidDateError(CopernicusError):
     """Raised when an invalid date is provided."""
+    pass
+
+
+class DownloadSizeExceededError(CopernicusError):
+    """Raised when remote product size exceeds safe local allocation limit."""
+    pass
+
+
+class ArchiveIntegrityError(CopernicusError):
+    """Raised when downloaded product archive is corrupted or invalid."""
+    pass
+
+
+class PathTraversalError(CopernicusError):
+    """Raised when an archive member attempts directory traversal outside destination."""
     pass
 
 
@@ -595,6 +612,118 @@ class CopernicusClient:
             "downloaded": False,
             "message": "Authorized for secure streaming to data/downloads/."
         }
+
+    @staticmethod
+    def safe_extract_zip(zip_path: Path, target_dir: Path) -> Path:
+        """
+        Safely extracts zip archive, preventing path traversal / zip slip attacks.
+        """
+        if not zip_path.exists():
+            raise FileNotFoundError(f"Archive file does not exist: {zip_path}")
+
+        target_dir = Path(target_dir).resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as archive:
+                corrupt_member = archive.testzip()
+                if corrupt_member is not None:
+                    raise ArchiveIntegrityError(f"Corrupted file found in archive {zip_path.name}: {corrupt_member}")
+
+                for member in archive.infolist():
+                    member_path = (target_dir / member.filename).resolve()
+                    try:
+                        member_path.relative_to(target_dir)
+                    except ValueError:
+                        raise PathTraversalError(
+                            f"Illegal path traversal detected in archive {zip_path.name}: {member.filename}"
+                        )
+                archive.extractall(target_dir)
+        except zipfile.BadZipFile as e:
+            raise ArchiveIntegrityError(f"Invalid or corrupted zip archive {zip_path.name}: {str(e)}")
+
+        return target_dir
+
+    def download_product(self, product_id: str, max_size_mb: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Downloads a Sentinel product from CDSE with stream chunking,
+        disk quota enforcement, and archive integrity validation.
+        """
+        prep = self.prepare_download(product_id)
+        if prep.get("status") == "CACHED":
+            return prep
+        if prep.get("status") != "AUTHORIZED":
+            return prep
+
+        token = self.get_auth_token()
+        if not token:
+            return {
+                "status": "CREDENTIALS_REQUIRED",
+                "product_id": product_id,
+                "downloaded": False,
+                "message": "Valid authentication token required for product download."
+            }
+
+        max_mb = max_size_mb or settings.CDSE_MAX_DOWNLOAD_SIZE_MB
+        download_url = f"{self.download_url}({product_id})/$value"
+        target_zip = DOWNLOADS_DIR / f"{product_id}.zip"
+        part_zip = DOWNLOADS_DIR / f"{product_id}.zip.part"
+
+        headers = {**self.headers, "Authorization": f"Bearer {token}"}
+
+        try:
+            with requests.get(download_url, headers=headers, stream=True, timeout=self.timeout) as res:
+                if res.status_code != 200:
+                    return {
+                        "status": "DOWNLOAD_FAILED",
+                        "product_id": product_id,
+                        "http_status": res.status_code,
+                        "downloaded": False,
+                        "message": f"CDSE download endpoint returned status {res.status_code}: {res.text[:200]}"
+                    }
+
+                content_len = res.headers.get("content-length")
+                if content_len:
+                    size_mb = int(content_len) / (1024 * 1024)
+                    if size_mb > max_mb:
+                        raise DownloadSizeExceededError(
+                            f"Product size ({size_mb:.1f} MB) exceeds maximum allowed threshold ({max_mb} MB)."
+                        )
+
+                with open(part_zip, "wb") as f:
+                    for chunk in res.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+            # Validate integrity of downloaded zip
+            with zipfile.ZipFile(part_zip, "r") as archive:
+                bad = archive.testzip()
+                if bad is not None:
+                    part_zip.unlink(missing_ok=True)
+                    raise ArchiveIntegrityError(f"Corrupted archive received for product {product_id}: {bad}")
+
+            # Promote to final zip file
+            if target_zip.exists():
+                target_zip.unlink()
+            part_zip.rename(target_zip)
+
+            return {
+                "status": "DOWNLOAD_COMPLETED",
+                "product_id": product_id,
+                "file_path": str(target_zip),
+                "size_bytes": target_zip.stat().st_size,
+                "downloaded": True
+            }
+
+        except Exception as e:
+            part_zip.unlink(missing_ok=True)
+            logger.error(f"Download failed for {product_id}: {e}")
+            return {
+                "status": "ERROR",
+                "product_id": product_id,
+                "downloaded": False,
+                "message": str(e)
+            }
 
 
 copernicus_client = CopernicusClient()

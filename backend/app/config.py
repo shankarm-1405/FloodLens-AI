@@ -20,9 +20,11 @@ else:
 
 CACHE_DIR = BASE_DIR / "data" / "cache"
 DOWNLOADS_DIR = BASE_DIR / "data" / "downloads"
+OUTPUTS_DIR = BASE_DIR / "data" / "outputs"
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings(BaseModel):

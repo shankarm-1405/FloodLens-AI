@@ -123,18 +123,54 @@ export interface CredentialsStatus {
   };
 }
 
-export interface FloodExtentSummary {
+export interface FloodAnalysisResult {
   analysis_id: string;
-  event_date: string;
-  pre_event_scene: S1Acquisition;
-  post_event_scene: S1Acquisition;
-  algorithm: 'Log-Ratio Thresholding (Otsu/Adaptive)' | 'DeepLabV3+ Water Baseline';
-  threshold_db: number;
-  candidate_flood_area_sqkm: number;
-  permanent_water_area_sqkm: number;
-  terrain_masked_area_sqkm: number;
-  confidence_score: number;
+  created_at: string;
+  status: 'COMPLETED' | 'PROCESSING' | 'FAILED';
   is_demo_fixture: boolean;
+  data_notice: string;
+  area_of_interest: {
+    bbox: number[];
+    region: string;
+  };
+  source_acquisitions: {
+    pre_event: S1Acquisition;
+    post_event: S1Acquisition;
+  };
+  parameters: {
+    threshold_db: number;
+    min_water_backscatter_db: number;
+    slope_threshold_deg: number;
+    filter_kernel_size: number;
+    min_polygon_pixels: number;
+    target_crs: string;
+  };
+  pixel_counts: {
+    total_pixels: number;
+    valid_pixels: number;
+    nodata_pixels: number;
+    unaffected_land_pixels: number;
+    candidate_flood_pixels: number;
+    permanent_water_pixels: number;
+    terrain_shadow_pixels: number;
+  };
+  area_statistics: {
+    pixel_area_sqm: number;
+    candidate_flood_area_sqkm: number;
+    permanent_water_area_sqkm: number;
+    terrain_masked_area_sqkm: number;
+    total_analyzed_area_sqkm: number;
+    valid_coverage_ratio: number;
+  };
+  raster_metadata: {
+    dimensions: number[];
+    crs: string;
+    geotransform: number[];
+    geotiff_file: string;
+    geojson_file: string;
+  };
+  warnings_and_uncertainties: string[];
+  legal_attributions: string[];
 }
 
 export interface InfrastructureExposure {

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.routes import router as base_router
 from app.api.satellite import router as satellite_router
+from app.api.flood import router as flood_router
 
 app = FastAPI(
     title="FloodLens AI API",
@@ -29,6 +30,7 @@ app.add_middleware(
 # Register routers
 app.include_router(base_router)
 app.include_router(satellite_router)
+app.include_router(flood_router)
 
 
 @app.get("/")
