@@ -1,0 +1,79 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.obj
+*.o
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment variables & secrets (CRITICAL)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+copernicus_secrets.json
+
+# Geospatial & Satellite data downloads (Large data)
+data/downloads/
+data/raw/
+data/cache/
+*.SAFE/
+*.zip
+*.tar.gz
+*.nc
+*.tif
+*.tiff
+!data/fixtures/*.geojson
+!data/fixtures/*.json
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+junit/
