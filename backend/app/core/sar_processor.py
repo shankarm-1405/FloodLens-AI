@@ -154,16 +154,44 @@ class SARProcessor:
         return slope_degrees
 
     @staticmethod
+    def parse_calibration_xml(xml_path: Path) -> Optional[float]:
+        """
+        Parses Sentinel-1 calibration XML and returns representative calibration factor.
+        """
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            sigma_vals = []
+            for vec in root.findall(".//calibrationVector"):
+                sigmas_elem = vec.find("sigmaNought")
+                if sigmas_elem is not None and sigmas_elem.text:
+                    for val_str in sigmas_elem.text.strip().split()[:20]:
+                        try:
+                            v = float(val_str)
+                            if v > 0:
+                                sigma_vals.append(v)
+                        except ValueError:
+                            pass
+            if sigma_vals:
+                return float(np.mean(sigma_vals))
+        except Exception as e:
+            logger.warning(f"Could not parse calibration XML at {xml_path}: {e}")
+        return None
+
+    @classmethod
     def find_measurement_files(
+        cls,
         product_path_or_id: Union[str, Path],
         polarization: str = "vv"
     ) -> Tuple[Path, Optional[Path]]:
         """
-        Locates measurement TIFF/COG raster and optional calibration XML within a Sentinel-1 SAFE directory.
+        Locates measurement TIFF/COG raster and optional calibration XML within a Sentinel-1 SAFE directory or zip archive.
         """
         pol_lower = polarization.lower().replace("&", "")
-        # Try direct path or look in DOWNLOADS_DIR
         base_path = Path(product_path_or_id)
+
+        # Check direct path or search in DOWNLOADS_DIR
         if not base_path.exists():
             base_path = DOWNLOADS_DIR / str(product_path_or_id)
         if not base_path.exists():
@@ -171,14 +199,32 @@ class SARProcessor:
             if matches:
                 base_path = matches[0]
 
+        # If archive zip exists, safely extract to a dedicated subfolder
+        if base_path.exists() and base_path.is_file() and base_path.suffix.lower() == ".zip":
+            extract_target = DOWNLOADS_DIR / base_path.stem
+            if not extract_target.exists():
+                from app.core.copernicus import copernicus_client
+                extract_target = copernicus_client.safe_extract_zip(base_path, extract_target)
+            base_path = extract_target
+
         if not base_path.exists():
             raise MissingMeasurementFilesError(
                 f"Product archive or directory not found for: '{product_path_or_id}' in {DOWNLOADS_DIR}"
             )
 
-        # Locate measurement directory
+        # If base_path contains an extracted .SAFE folder, descend into it
+        safe_dirs = list(base_path.glob("*.SAFE"))
+        if safe_dirs and not (base_path / "measurement").exists():
+            base_path = safe_dirs[0]
+
+        # Locate measurement directory or rasters
         meas_dir = base_path / "measurement" if (base_path / "measurement").exists() else base_path
-        tiff_files = list(meas_dir.glob("*.tif*")) + list(meas_dir.glob("*.cog*"))
+        tiff_files = (
+            list(meas_dir.glob("*.tif*")) +
+            list(meas_dir.glob("*.cog*")) +
+            list(base_path.glob("**/measurement/*.tif*")) +
+            list(base_path.glob("**/measurement/*.cog*"))
+        )
 
         matched_tiff = None
         for tf in tiff_files:
@@ -197,24 +243,32 @@ class SARProcessor:
 
         # Optional calibration XML
         calib_xml = None
-        calib_dir = base_path / "annotation" / "calibration"
-        if calib_dir.exists():
-            xmls = list(calib_dir.glob(f"calibration*{pol_lower}*.xml"))
-            if xmls:
-                calib_xml = xmls[0]
+        calib_candidates = (
+            list(base_path.glob(f"**/calibration*{pol_lower}*.xml")) +
+            list(base_path.glob("annotation/calibration/*.xml"))
+        )
+        if calib_candidates:
+            calib_xml = calib_candidates[0]
 
         return matched_tiff, calib_xml
 
-    @staticmethod
+    @classmethod
     def calibrate_dn_to_backscatter_db(
+        cls,
         dn_array: np.ndarray,
-        calibration_constant: float = 300.0
+        calibration_constant: float = 300.0,
+        calibration_xml_path: Optional[Path] = None
     ) -> np.ndarray:
         """
         Converts raw Sentinel-1 Level-1 GRD Digital Number (DN) values to backscatter in dB.
         σ° (dB) = 20 * log10(DN) - 20 * log10(calibration_constant)
         Pixels with DN <= 0 are treated as nodata / NaN.
         """
+        if calibration_xml_path and Path(calibration_xml_path).exists():
+            parsed_k = cls.parse_calibration_xml(Path(calibration_xml_path))
+            if parsed_k is not None:
+                calibration_constant = parsed_k
+
         backscatter_db = np.full(dn_array.shape, np.nan, dtype=np.float32)
         valid = (dn_array > 0) & (~np.isnan(dn_array))
         backscatter_db[valid] = 20.0 * np.log10(dn_array[valid].astype(np.float32)) - 20.0 * np.log10(calibration_constant)
@@ -328,7 +382,7 @@ class SARProcessor:
         """
         Calculates pixel area in square meters.
         For projected CRSs (UTM), area is |a * e|.
-        For EPSG:4326 geographic coordinates, uses geodesic ellipsoid scaling at center latitude.
+        For EPSG:4326 geographic coordinates, uses exact geodesic ellipsoid computation.
         """
         dx_deg = abs(transform.a)
         dy_deg = abs(transform.e)
@@ -341,14 +395,24 @@ class SARProcessor:
             # Projected coordinate systems (meters)
             return float(dx_deg * dy_deg)
         else:
-            # WGS84 Geographic CRS (EPSG:4326): approximate geodesic pixel dimensions
-            # 1 deg lat ~ 111,139 m; 1 deg lon ~ 111,139 * cos(lat) m
-            lat_rad = math.radians(center_lat)
-            meters_per_deg_lat = 111139.0
-            meters_per_deg_lon = 111139.0 * math.cos(lat_rad)
-            pixel_w_m = dx_deg * meters_per_deg_lon
-            pixel_h_m = dy_deg * meters_per_deg_lat
-            return float(pixel_w_m * pixel_h_m)
+            # WGS84 Geographic CRS: compute exact geodesic area using pyproj.Geod
+            try:
+                import pyproj
+                geod = pyproj.Geod(ellps="WGS84")
+                poly_lon = [85.15, 85.15 + dx_deg, 85.15 + dx_deg, 85.15, 85.15]
+                poly_lat = [center_lat, center_lat, center_lat + dy_deg, center_lat + dy_deg, center_lat]
+                area_sqm, _ = geod.polygon_area_perimeter(poly_lon, poly_lat)
+                return float(abs(area_sqm))
+            except Exception:
+                # WGS84 ellipsoid principal radii of curvature fallback
+                lat_rad = math.radians(center_lat)
+                a = 6378137.0
+                e2 = 0.00669437999014
+                M = a * (1.0 - e2) / ((1.0 - e2 * (math.sin(lat_rad) ** 2)) ** 1.5)
+                N = a / math.sqrt(1.0 - e2 * (math.sin(lat_rad) ** 2))
+                meters_per_deg_lat = math.radians(1.0) * M
+                meters_per_deg_lon = math.radians(1.0) * N * math.cos(lat_rad)
+                return float(dx_deg * meters_per_deg_lon * dy_deg * meters_per_deg_lat)
 
     @classmethod
     def calculate_area_statistics(
@@ -606,6 +670,15 @@ class SARProcessor:
             params=params
         )
 
+        # Generate preview PNG images for rapid visual exploration
+        cls.generate_preview_pngs(
+            pre_db=pre_db,
+            post_db=post_db,
+            diff_db=diff_db,
+            classification=classification,
+            output_dir=analysis_dir
+        )
+
         # Calculate exact area metrics
         center_lat = (bbox[1] + bbox[3]) / 2.0
         pixel_area_sqm = cls.calculate_pixel_area_sqm(transform, crs_str, center_lat=center_lat)
@@ -632,7 +705,8 @@ class SARProcessor:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "COMPLETED",
             "is_demo_fixture": not is_real_data,
-            "processing_mode": "REAL_SENTINEL1_GRD" if is_real_data else "SYNTHETIC_TEST_FIXTURE",
+            "provenance": "REAL_SATELLITE_DERIVED" if is_real_data else "SYNTHETIC_TEST_FIXTURE",
+            "processing_mode": "REAL_SATELLITE_DERIVED" if is_real_data else "SYNTHETIC_TEST_FIXTURE",
             "data_notice": "REAL SATELLITE DERIVED CANDIDATE MASK" if is_real_data else "DEMONSTRATION DATA — NOT REAL FLOOD ANALYSIS",
             "area_of_interest": {
                 "bbox": bbox,
@@ -664,7 +738,11 @@ class SARProcessor:
                 "crs": params.target_crs,
                 "geotransform": [transform.a, transform.b, transform.c, transform.d, transform.e, transform.f],
                 "geotiff_file": f"/api/flood/download/{analysis_id}/geotiff",
-                "geojson_file": f"/api/flood/download/{analysis_id}/geojson"
+                "geojson_file": f"/api/flood/download/{analysis_id}/geojson",
+                "pre_preview": f"/api/flood/preview/{analysis_id}/pre",
+                "post_preview": f"/api/flood/preview/{analysis_id}/post",
+                "diff_preview": f"/api/flood/preview/{analysis_id}/diff",
+                "mask_preview": f"/api/flood/preview/{analysis_id}/mask"
             },
             "warnings_and_uncertainties": [
                 "Candidate flood mask reflects specular backscatter decline; field ground truthing required.",
@@ -683,6 +761,70 @@ class SARProcessor:
             json.dump(metadata, f, indent=2)
 
         return metadata
+
+    @staticmethod
+    def generate_preview_pngs(
+        pre_db: np.ndarray,
+        post_db: np.ndarray,
+        diff_db: np.ndarray,
+        classification: np.ndarray,
+        output_dir: Path
+    ) -> Dict[str, str]:
+        """
+        Generates high-contrast PNG previews for rapid visual inspection in web UI.
+        """
+        try:
+            from PIL import Image
+
+            def to_uint8_gray(arr: np.ndarray, vmin: float = -25.0, vmax: float = 0.0) -> np.ndarray:
+                clipped = np.clip(arr, vmin, vmax)
+                clipped = np.where(np.isnan(clipped), vmin, clipped)
+                norm = ((clipped - vmin) / (vmax - vmin) * 255.0).astype(np.uint8)
+                return norm
+
+            # 1. Pre-event amplitude grayscale
+            pre_u8 = to_uint8_gray(pre_db)
+            Image.fromarray(pre_u8).save(output_dir / "pre_preview.png")
+
+            # 2. Post-event amplitude grayscale
+            post_u8 = to_uint8_gray(post_db)
+            Image.fromarray(post_u8).save(output_dir / "post_preview.png")
+
+            # 3. Log-ratio difference RGB
+            h, w = diff_db.shape
+            diff_clipped = np.clip(diff_db, -8.0, 4.0)
+            diff_clipped = np.where(np.isnan(diff_clipped), 0.0, diff_clipped)
+            diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            # Specular drops (water candidates): bright cyan/blue
+            neg = diff_clipped < 0
+            diff_rgb[neg, 0] = 0
+            diff_rgb[neg, 1] = np.clip(np.abs(diff_clipped[neg]) / 8.0 * 220, 0, 220).astype(np.uint8)
+            diff_rgb[neg, 2] = np.clip(np.abs(diff_clipped[neg]) / 8.0 * 255, 0, 255).astype(np.uint8)
+            # Positive increases: warm brownish
+            pos = diff_clipped >= 0
+            diff_rgb[pos, 0] = np.clip(diff_clipped[pos] / 4.0 * 180 + 40, 40, 220).astype(np.uint8)
+            diff_rgb[pos, 1] = 40
+            diff_rgb[pos, 2] = 40
+            Image.fromarray(diff_rgb).save(output_dir / "diff_preview.png")
+
+            # 4. Classification mask RGB overlay
+            mask_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            mask_rgb[classification == SARProcessor.CLASS_UNAFFECTED_LAND] = [35, 45, 55]
+            mask_rgb[classification == SARProcessor.CLASS_CANDIDATE_FLOOD] = [6, 182, 212]
+            mask_rgb[classification == SARProcessor.CLASS_PERMANENT_WATER] = [37, 99, 235]
+            mask_rgb[classification == SARProcessor.CLASS_TERRAIN_SHADOW] = [180, 83, 9]
+            mask_rgb[classification == SARProcessor.CLASS_NODATA] = [10, 15, 25]
+            Image.fromarray(mask_rgb).save(output_dir / "mask_preview.png")
+
+            return {
+                "pre_preview": "pre_preview.png",
+                "post_preview": "post_preview.png",
+                "diff_preview": "diff_preview.png",
+                "mask_preview": "mask_preview.png"
+            }
+        except Exception as e:
+            logger.warning(f"Could not generate preview PNGs: {e}")
+            return {}
 
 
 sar_processor = SARProcessor()

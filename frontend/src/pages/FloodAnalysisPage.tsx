@@ -30,8 +30,10 @@ import {
   searchSatelliteAcquisitions, 
   fetchCredentialsStatus,
   checkDownloadReadiness,
-  triggerFloodAnalysis 
+  triggerFloodAnalysis,
+  fetchAnalysisMetadata 
 } from '../services/api';
+import { FloodMap } from '../components/FloodMap';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -66,14 +68,38 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
   const [downloadResult, setDownloadResult] = useState<any | null>(null);
 
   // SAR Inundation Execution State
+  const [targetAnalysisId, setTargetAnalysisId] = useState<string>(() => {
+    return localStorage.getItem('floodlens_last_analysis_id') || 'e2e-trishuli-aug2026';
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<FloodAnalysisResult | null>(null);
 
-  // Load credentials status on mount
+  // Load credentials status and active benchmark on mount
   useEffect(() => {
     fetchCredentialsStatus().then(setCredentialsStatus);
+    const initialId = localStorage.getItem('floodlens_last_analysis_id') || 'e2e-trishuli-aug2026';
+    fetchAnalysisMetadata(initialId)
+      .then((data) => {
+        setAnalysisResult(data);
+      })
+      .catch(() => {
+        // Benchmark not yet run or offline; ignore gracefully
+      });
   }, []);
+
+  const handleLoadExistingAnalysis = async (idToLoad: string) => {
+    if (!idToLoad.trim()) return;
+    setProcessingError(null);
+    try {
+      const data = await fetchAnalysisMetadata(idToLoad.trim());
+      setAnalysisResult(data);
+      localStorage.setItem('floodlens_last_analysis_id', idToLoad.trim());
+      setTargetAnalysisId(idToLoad.trim());
+    } catch (err: any) {
+      setProcessingError(err.message || `Could not find analysis '${idToLoad}'.`);
+    }
+  };
 
   const handleExecuteSearch = async () => {
     setIsSearching(true);
@@ -138,6 +164,10 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
         is_demo: searchResult?.is_demo_fixture ?? health?.demo_mode ?? true,
       });
       setAnalysisResult(result);
+      if (result.analysis_id) {
+        localStorage.setItem('floodlens_last_analysis_id', result.analysis_id);
+        setTargetAnalysisId(result.analysis_id);
+      }
     } catch (err: any) {
       setProcessingError(err.message || 'SAR Inundation processing failed');
     } finally {
@@ -171,6 +201,42 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
               <span>CDSE Auth: Metadata Only</span>
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Active Analysis Selector */}
+      <div className="rounded-xl bg-slate-900 border border-slate-800 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center space-x-2">
+          <Layers className="w-4 h-4 text-cyan-400" />
+          <span className="text-slate-300 font-medium">Active Flood Analysis Target:</span>
+          <span className="font-mono text-cyan-300 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+            {analysisResult?.analysis_id || targetAnalysisId}
+          </span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <input
+            type="text"
+            value={targetAnalysisId}
+            onChange={(e) => setTargetAnalysisId(e.target.value)}
+            placeholder="e.g. e2e-trishuli-aug2026"
+            className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-xs w-48 focus:outline-none focus:border-cyan-500"
+          />
+          <button
+            onClick={() => handleLoadExistingAnalysis(targetAnalysisId)}
+            className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition-all flex items-center space-x-1 cursor-pointer"
+          >
+            <RefreshCw className="w-3 h-3 text-cyan-400" />
+            <span>Load</span>
+          </button>
+          <button
+            onClick={() => {
+              setTargetAnalysisId('e2e-trishuli-aug2026');
+              handleLoadExistingAnalysis('e2e-trishuli-aug2026');
+            }}
+            className="px-2.5 py-1 rounded-lg bg-sky-950/70 hover:bg-sky-900 text-sky-300 border border-sky-800 text-xs font-mono transition-all cursor-pointer"
+          >
+            Benchmark
+          </button>
         </div>
       </div>
 
@@ -443,7 +509,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                       ? 'bg-amber-950 text-amber-300 border border-amber-800' 
                       : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                   }`}>
-                    {analysisResult.is_demo_fixture ? 'DEMO FIXTURE' : 'REAL SATELLITE DERIVED'}
+                    {analysisResult.is_demo_fixture ? 'SYNTHETIC_TEST_FIXTURE' : 'REAL_SATELLITE_DERIVED'}
                   </span>
                 </div>
               </div>
@@ -483,8 +549,96 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 </div>
               </div>
 
+              {/* Source Product & Viewing Geometry Provenance */}
+              <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2 text-xs">
+                <span className="font-semibold text-white font-mono text-[11px] block uppercase">
+                  Source Sentinel-1 Geometry & Timing Provenance:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800/80 space-y-1">
+                    <span className="text-cyan-400 font-bold block">Pre-Event Acquisition:</span>
+                    <div className="text-slate-300">Date: <strong>{analysisResult.source_acquisitions.pre_event.acquisition_date}</strong></div>
+                    <div className="text-slate-400 text-[10px] truncate" title={analysisResult.source_acquisitions.pre_event.name}>
+                      File: {analysisResult.source_acquisitions.pre_event.name}
+                    </div>
+                    <div className="text-slate-400 text-[10px]">
+                      Pass: <strong className="text-slate-200">{analysisResult.source_acquisitions.pre_event.orbit_pass}</strong> | Rel Orbit: <strong className="text-slate-200">{analysisResult.source_acquisitions.pre_event.relative_orbit ?? 'N/A'}</strong> | Pol: <strong className="text-slate-200">{analysisResult.source_acquisitions.pre_event.polarization}</strong>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800/80 space-y-1">
+                    <span className="text-cyan-400 font-bold block">Post-Event Acquisition:</span>
+                    <div className="text-slate-300">Date: <strong>{analysisResult.source_acquisitions.post_event.acquisition_date}</strong></div>
+                    <div className="text-slate-400 text-[10px] truncate" title={analysisResult.source_acquisitions.post_event.name}>
+                      File: {analysisResult.source_acquisitions.post_event.name}
+                    </div>
+                    <div className="text-slate-400 text-[10px]">
+                      Pass: <strong className="text-slate-200">{analysisResult.source_acquisitions.post_event.orbit_pass}</strong> | Rel Orbit: <strong className="text-slate-200">{analysisResult.source_acquisitions.post_event.relative_orbit ?? 'N/A'}</strong> | Pol: <strong className="text-slate-200">{analysisResult.source_acquisitions.post_event.polarization}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-900 text-[10px] font-mono text-slate-400">
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                    Threshold: {analysisResult.parameters.threshold_db} dB
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                    Water Ceiling: {analysisResult.parameters.min_water_backscatter_db} dB
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                    DEM Slope Cutoff: {analysisResult.parameters.slope_threshold_deg}°
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                    Speckle Kernel: {analysisResult.parameters.filter_kernel_size}×{analysisResult.parameters.filter_kernel_size}
+                  </span>
+                </div>
+              </div>
+
+              {/* Before/After SAR Visual Inspection Previews */}
+              {analysisResult.raster_metadata.pre_preview && (
+                <div className="space-y-2 pt-1 border-t border-slate-800">
+                  <span className="font-semibold text-slate-300 font-mono text-[11px] block uppercase">
+                    SAR Amplitude & Difference Previews (Visual Inspection):
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                      <span className="text-[10px] font-mono text-slate-400 block truncate">1. Pre-Event SAR</span>
+                      <img 
+                        src={`${API_BASE}${analysisResult.raster_metadata.pre_preview}`} 
+                        alt="Pre-event amplitude"
+                        className="w-full h-24 object-cover rounded bg-slate-900 border border-slate-800"
+                      />
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                      <span className="text-[10px] font-mono text-slate-400 block truncate">2. Post-Event SAR</span>
+                      <img 
+                        src={`${API_BASE}${analysisResult.raster_metadata.post_preview}`} 
+                        alt="Post-event amplitude"
+                        className="w-full h-24 object-cover rounded bg-slate-900 border border-slate-800"
+                      />
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                      <span className="text-[10px] font-mono text-cyan-400 block truncate">3. Δ Ratio (Diff)</span>
+                      <img 
+                        src={`${API_BASE}${analysisResult.raster_metadata.diff_preview}`} 
+                        alt="Log ratio diff"
+                        className="w-full h-24 object-cover rounded bg-slate-900 border border-slate-800"
+                      />
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                      <span className="text-[10px] font-mono text-emerald-400 block truncate">4. Extent Mask</span>
+                      <img 
+                        src={`${API_BASE}${analysisResult.raster_metadata.mask_preview}`} 
+                        alt="Classification mask"
+                        className="w-full h-24 object-cover rounded bg-slate-900 border border-slate-800"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Download Buttons for Generated Files */}
-              <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-800">
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
                 <a
                   href={`${API_BASE}${analysisResult.raster_metadata.geotiff_file}`}
                   download
@@ -533,7 +687,7 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
                 </div>
                 {searchResult.is_demo_fixture && (
                   <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-600/40 text-[10px]">
-                    DEMO FIXTURE DATA
+                    SYNTHETIC_TEST_FIXTURE
                   </span>
                 )}
               </div>
@@ -658,33 +812,12 @@ export const FloodAnalysisPage: React.FC<FloodAnalysisPageProps> = ({ health }) 
             </div>
           )}
 
-          {/* Interactive Spatial Canvas */}
-          <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shadow-xl">
-            <div className="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between text-xs font-mono">
-              <div className="flex items-center space-x-2">
-                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-                <span className="text-slate-200 font-semibold">Trishuli Spatial Viewport</span>
-              </div>
-              <span className="text-slate-400 text-[11px]">EPSG:4326 • 10m Ground Resolution</span>
-            </div>
-
-            <div className="relative w-full h-[320px] bg-slate-950 flex items-center justify-center overflow-hidden">
-              <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]" />
-              <div className="relative z-10 text-center space-y-2 bg-slate-900/90 p-5 rounded-xl border border-slate-800 max-w-sm backdrop-blur-md">
-                <Radar className="w-8 h-8 text-cyan-400 mx-auto" />
-                <h4 className="text-xs font-semibold text-white">
-                  {analysisResult 
-                    ? `Candidate Flood Mask: ${analysisResult.area_statistics.candidate_flood_area_sqkm} km²` 
-                    : 'Spatial View Ready'}
-                </h4>
-                <p className="text-[11px] text-slate-400">
-                  {selectedPair 
-                    ? `Pre: ${selectedPair.pre_event_scene.acquisition_date.split('T')[0]} vs Post: ${selectedPair.post_event_scene.acquisition_date.split('T')[0]}`
-                    : 'Search satellite catalog to configure pre/post pair'}
-                </p>
-              </div>
-            </div>
-          </div>
+          {/* Interactive Leaflet Spatial Canvas */}
+          <FloodMap
+            bbox={[minLon, minLat, maxLon, maxLat]}
+            analysisResult={analysisResult}
+            className="h-[480px]"
+          />
         </div>
       </div>
 

@@ -141,3 +141,159 @@ export async function fetchAnalysisMetadata(analysisId: string): Promise<FloodAn
   }
   return await res.json();
 }
+
+export async function triggerInfrastructureAnalysis(params: {
+  analysis_id: string;
+  osm_source?: string;
+  allow_fallback_fixture?: boolean;
+  buffer_threshold_meters?: number;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/infrastructure/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Infrastructure analysis failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function fetchInfrastructureStatus(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/infrastructure/status/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch infrastructure status for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchInfrastructureSummary(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/infrastructure/summary/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch infrastructure summary for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchExposedLayerGeoJSON(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/infrastructure/layers/${encodeURIComponent(analysisId)}/exposed`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch exposed infrastructure layer for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchBaselineLayerGeoJSON(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/infrastructure/layers/${encodeURIComponent(analysisId)}/baseline`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch baseline infrastructure layer for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function triggerConnectivityAnalysis(params: {
+  analysis_id: string;
+  hubs?: string[];
+  candidate_communities?: string[];
+  closure_method?: string;
+  snapping_tolerance_m?: number;
+  max_settlement_snap_distance_m?: number;
+  osm_source?: string;
+  allow_fallback_fixture?: boolean;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/connectivity/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Connectivity analysis failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function fetchConnectivityStatus(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/connectivity/status/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch connectivity status for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchConnectivitySummary(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/connectivity/summary/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch connectivity summary for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchConnectivityRoutesGeoJSON(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/connectivity/routes/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch routes layer for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchClosedRoadsGeoJSON(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/connectivity/layers/${encodeURIComponent(analysisId)}/closed_roads`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch closed roads layer for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchReportStatus(analysisId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/report/status/${encodeURIComponent(analysisId)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch report status for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function fetchSituationReport(analysisId: string, language: 'en' | 'ne' = 'en'): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/report/${encodeURIComponent(analysisId)}?language=${encodeURIComponent(language)}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to fetch situation report for ${analysisId}`);
+  }
+  return await res.json();
+}
+
+export async function triggerReportGeneration(params: {
+  analysis_id: string;
+  language?: 'en' | 'ne';
+  use_llm?: boolean;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/report/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Report generation failed with status ${res.status}`);
+  }
+
+  return await res.json();
+}
+

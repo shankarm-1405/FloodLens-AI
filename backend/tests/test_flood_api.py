@@ -122,3 +122,36 @@ def test_start_flood_analysis_missing_measurements_non_demo():
     response = client.post("/api/flood/analyze", json=payload)
     assert response.status_code == 422
     assert "Missing measurement files" in response.json()["detail"]
+
+
+def test_path_traversal_analysis_id_rejected():
+    # Attempt directory traversal or forbidden characters
+    bad_ids = ["../malicious", "....//secret", "id with spaces", "id;rm -rf", "test/slash"]
+    for bad_id in bad_ids:
+        res = client.get(f"/api/flood/status/{bad_id}")
+        assert res.status_code == 400 or res.status_code == 404
+
+
+def test_analysis_previews_and_status():
+    # Verify previews generated in test-trishuli-unit-01
+    for kind in ["pre", "post", "diff", "mask"]:
+        res = client.get(f"/api/flood/preview/test-trishuli-unit-01/{kind}")
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/png"
+        assert len(res.content) > 100
+
+    # Invalid preview kind
+    bad_res = client.get("/api/flood/preview/test-trishuli-unit-01/invalid_kind")
+    assert bad_res.status_code == 400
+
+    # Nonexistent analysis preview
+    missing_res = client.get("/api/flood/preview/nonexistent-analysis-id-001/pre")
+    assert missing_res.status_code == 404
+
+
+def test_download_nonexistent_outputs():
+    res_tif = client.get("/api/flood/download/nonexistent-id-002/geotiff")
+    assert res_tif.status_code == 404
+
+    res_geojson = client.get("/api/flood/download/nonexistent-id-002/geojson")
+    assert res_geojson.status_code == 404

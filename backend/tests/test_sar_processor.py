@@ -248,3 +248,60 @@ def test_archive_integrity_check(tmp_path):
     with pytest.raises(ArchiveIntegrityError, match="Invalid or corrupted zip"):
         copernicus_client.safe_extract_zip(corrupt_file, target_dir)
 
+
+def test_geodesic_vs_projected_pixel_area():
+    from rasterio.transform import Affine
+    # 1. Projected UTM CRS: 10m x 10m pixel = 100 m^2
+    utm_transform = Affine(10.0, 0.0, 300000.0, 0.0, -10.0, 3000000.0)
+    utm_area = SARProcessor.calculate_pixel_area_sqm(utm_transform, "EPSG:32645", center_lat=27.85)
+    assert pytest.approx(utm_area, abs=1e-3) == 100.0
+
+    # 2. Geographic WGS84 CRS: 0.0001 deg (~11m lat, ~9.8m lon)
+    geo_transform = Affine(0.0001, 0.0, 85.05, 0.0, -0.0001, 27.95)
+    geo_area = SARProcessor.calculate_pixel_area_sqm(geo_transform, "EPSG:4326", center_lat=27.85)
+    # Area should be strictly positive and between 105 and 115 m^2
+    assert 105.0 < geo_area < 115.0
+
+
+def test_parse_calibration_xml_synthetic(tmp_path):
+    # Create synthetic Sentinel-1 calibration XML fixture
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+    <calibration>
+      <calibrationVectorList count="1">
+        <calibrationVector>
+          <line>0</line>
+          <pixel>0</pixel>
+          <sigmaNought>312.4 314.1 310.8 315.0</sigmaNought>
+        </calibrationVector>
+      </calibrationVectorList>
+    </calibration>"""
+    xml_file = tmp_path / "calibration-s1d-iw-grd-vv.xml"
+    xml_file.write_text(xml_content, encoding="utf-8")
+
+    calib_val = SARProcessor.parse_calibration_xml(xml_file)
+    assert calib_val is not None
+    assert pytest.approx(calib_val, abs=1.0) == 313.0
+
+    # Calibrate with XML path
+    dn_arr = np.array([[313.0]], dtype=np.float32)
+    db = SARProcessor.calibrate_dn_to_backscatter_db(dn_arr, calibration_xml_path=xml_file)
+    # 20 * log10(313) - 20 * log10(313) ~ 0 dB
+    assert pytest.approx(db[0, 0], abs=0.1) == 0.0
+
+
+def test_find_measurement_files_from_zip_archive(tmp_path):
+    # Create a synthetic Sentinel-1 SAFE directory structure inside a zip
+    product_name = "S1D_IW_GRDH_TEST_PRODUCT"
+    zip_path = tmp_path / f"{product_name}.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(f"{product_name}.SAFE/measurement/s1d-iw-grd-vv-test.tiff", b"RIFF_FAKE_TIFF_HEADER")
+        zf.writestr(f"{product_name}.SAFE/annotation/calibration/calibration-s1d-iw-grd-vv.xml", b"<calibration/>")
+
+    # Pass the zip path to find_measurement_files
+    meas_tiff, calib_xml = SARProcessor.find_measurement_files(zip_path, polarization="vv")
+    assert meas_tiff.exists()
+    assert "vv" in meas_tiff.name
+    assert calib_xml is not None
+    assert calib_xml.exists()
+

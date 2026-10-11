@@ -41,6 +41,7 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+*.tsbuildinfo
 
 # Environment variables & secrets (CRITICAL)
 .env

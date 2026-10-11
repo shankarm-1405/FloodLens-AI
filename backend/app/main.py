@@ -9,6 +9,9 @@ from app.config import settings
 from app.api.routes import router as base_router
 from app.api.satellite import router as satellite_router
 from app.api.flood import router as flood_router
+from app.api.infrastructure import router as infrastructure_router
+from app.api.connectivity import router as connectivity_router
+from app.api.report import router as report_router
 
 app = FastAPI(
     title="FloodLens AI API",
@@ -31,6 +34,9 @@ app.add_middleware(
 app.include_router(base_router)
 app.include_router(satellite_router)
 app.include_router(flood_router)
+app.include_router(infrastructure_router)
+app.include_router(connectivity_router)
+app.include_router(report_router)
 
 
 @app.get("/")

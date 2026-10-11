@@ -13,9 +13,42 @@ import { ReportPage } from './pages/ReportPage';
 import { MethodologyPage } from './pages/MethodologyPage';
 import { LimitationsPage } from './pages/LimitationsPage';
 
+const validPages: PageId[] = [
+  'overview',
+  'flood-analysis',
+  'infrastructure',
+  'connectivity',
+  'ai-report',
+  'methodology',
+  'limitations'
+];
+
+const getInitialPage = (): PageId => {
+  if (typeof window === 'undefined') return 'overview';
+  const hash = window.location.hash.replace('#', '') as PageId;
+  if (validPages.includes(hash)) return hash;
+  const params = new URLSearchParams(window.location.search);
+  const pageParam = params.get('page') as PageId;
+  if (validPages.includes(pageParam)) return pageParam;
+  return 'overview';
+};
+
 export function App() {
-  const [currentPage, setCurrentPage] = useState<PageId>('overview');
+  const [currentPage, setCurrentPage] = useState<PageId>(getInitialPage);
   const [health, setHealth] = useState<SystemHealth | null>(null);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setCurrentPage(getInitialPage());
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const handlePageChange = (page: PageId) => {
+    setCurrentPage(page);
+    window.location.hash = page;
+  };
 
   useEffect(() => {
     checkBackendHealth().then(setHealth);
@@ -30,7 +63,7 @@ export function App() {
   const renderActivePage = () => {
     switch (currentPage) {
       case 'overview':
-        return <OverviewPage onNavigate={setCurrentPage} health={health} />;
+        return <OverviewPage onNavigate={handlePageChange} health={health} />;
       case 'flood-analysis':
         return <FloodAnalysisPage health={health} />;
       case 'infrastructure':
@@ -44,7 +77,7 @@ export function App() {
       case 'limitations':
         return <LimitationsPage />;
       default:
-        return <OverviewPage onNavigate={setCurrentPage} health={health} />;
+        return <OverviewPage onNavigate={handlePageChange} health={health} />;
     }
   };
 
@@ -52,7 +85,7 @@ export function App() {
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-slate-950 font-sans">
       <Navbar
         currentPage={currentPage}
-        onPageChange={setCurrentPage}
+        onPageChange={handlePageChange}
         health={health}
       />
 

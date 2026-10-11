@@ -168,56 +168,199 @@ export interface FloodAnalysisResult {
     geotransform: number[];
     geotiff_file: string;
     geojson_file: string;
+    pre_preview?: string;
+    post_preview?: string;
+    diff_preview?: string;
+    mask_preview?: string;
   };
   warnings_and_uncertainties: string[];
   legal_attributions: string[];
 }
 
-export interface InfrastructureExposure {
-  analysis_id: string;
-  osm_snapshot_reference: string;
-  query_timestamp: string;
-  exposed_buildings_count: number;
-  exposed_road_length_km: number;
-  exposed_bridges_count: number;
-  buffer_zone_buildings_count: number;
-  critical_facilities_exposed: {
-    name: string;
-    type: 'hospital' | 'clinic' | 'school' | 'substation';
-    coordinates: [number, number];
-    distance_to_water_m: number;
-  }[];
-  is_demo_fixture: boolean;
+export interface FacilityDetail {
+  osm_id: number | string;
+  name: string;
+  facility_type: string;
+  coordinates: [number, number];
+  exposure_status: 'DIRECTLY_INTERSECTING' | 'BUFFER_ZONE_30M' | 'SAFE_ELEVATED';
+  distance_to_flood_m: number;
+  beds?: string;
+  emergency?: string;
 }
 
-export interface SettlementConnectivity {
+export type ProvenanceType = 
+  | 'REAL_SATELLITE_DERIVED'
+  | 'VERIFIED_HISTORICAL_OSM'
+  | 'CURRENT_OSM_PREVIEW'
+  | 'SYNTHETIC_TEST_FIXTURE'
+  | 'UNAVAILABLE'
+  | 'REAL_DATA_ANALYSIS'
+  | 'HISTORICAL_SNAPSHOT_UNAVAILABLE';
+
+export interface InfrastructureExposureSummary {
   analysis_id: string;
-  target_hub: string;
-  total_settlements_evaluated: number;
-  isolated_settlements_count: number;
-  penalized_route_count: number;
-  settlement_details: {
-    name: string;
-    pre_event_travel_dist_km: number;
-    post_event_status: 'Connected' | 'Isolated' | 'Detoured';
-    post_event_travel_dist_km: number | null;
-    isolated_reason?: string;
-  }[];
-  is_demo_fixture: boolean;
+  created_at: string;
+  status: string;
+  provenance: ProvenanceType;
+  is_synthetic: boolean;
+  data_notice: string;
+  osm_source: string;
+  osm_snapshot_date: string;
+  osm_attribution: string;
+  aoi_bbox: number[];
+  total_infrastructure_assessed: number;
+  valid_geometry_count: number;
+  invalid_geometry_count: number;
+  exposed_buildings_count: number | null;
+  exposed_building_area_sqm: number | null;
+  exposed_building_area_sqkm: number | null;
+  exposed_road_length_km: number | null;
+  exposed_bridges_count: number | null;
+  critical_facilities_assessed: number;
+  critical_facilities_intersecting: number | null;
+  critical_facilities_in_buffer: number | null;
+  critical_facilities_details: FacilityDetail[];
+  settlements_intersecting_count?: number;
+  blocker_reason?: string | null;
+  limitations_and_uncertainties: string[];
 }
+
+export interface InfrastructureExposure extends InfrastructureExposureSummary {}
+
+export interface SettlementDetail {
+  name: string;
+  osm_id?: number | string;
+  status: 'NEWLY_DISCONNECTED' | 'ALREADY_DISCONNECTED' | 'DETOURED' | 'UNCHANGED' | 'SNAP_FAILED' | 'UNAVAILABLE';
+  isolation_cause: string;
+  coordinates: [number, number] | null;
+  nearest_hub: string | null;
+  snapped_distance_m?: number | null;
+  baseline_distance_km: number | null;
+  baseline_travel_time_minutes: number | null;
+  post_flood_distance_km: number | null;
+  post_flood_travel_time_minutes: number | null;
+  detour_distance_km: number | null;
+  detour_travel_time_minutes: number | null;
+  hub_connections?: Record<string, any>;
+}
+
+export interface HubDetail {
+  name: string;
+  status: 'SNAPPED' | 'SNAP_FAILED' | 'UNAVAILABLE';
+  nearest_node?: string | null;
+  distance_m?: number | null;
+  coordinates?: [number, number] | null;
+  reason?: string;
+}
+
+export interface ConnectivitySummary {
+  analysis_id: string;
+  status: string;
+  provenance: string;
+  is_synthetic: boolean;
+  data_notice: string;
+  flood_analysis_id: string;
+  flood_provenance: string;
+  infrastructure_provenance: string;
+  osm_snapshot_date: string;
+  osm_attribution: string;
+  graph_construction_settings: {
+    projected_crs: string;
+    snapping_tolerance_m: number;
+    max_settlement_snap_distance_m: number;
+    elevation_separation_handled: boolean;
+    nodes_count: number;
+    edges_count: number;
+    connected_components_count: number;
+    total_road_length_km: number;
+    invalid_geometries_count: number;
+    roads_omitted_count: number;
+  };
+  closure_parameters: {
+    road_closure_method: string;
+    closed_edges_count: number;
+    closed_bridges_count: number;
+    closure_description: string;
+  };
+  speed_assumptions: {
+    speeds_kmh: Record<string, number>;
+    notice: string;
+  };
+  summary_counts: {
+    settlements_evaluated: number;
+    settlements_matched_and_snapped: number;
+    newly_disconnected: number;
+    already_disconnected_at_baseline: number;
+    detoured: number;
+    route_unchanged: number;
+    unavailable: number;
+    snap_failed: number;
+  };
+  settlement_details: SettlementDetail[];
+  regional_hubs: Record<string, HubDetail>;
+  output_files: {
+    summary_json: string;
+    routes_geojson: string;
+    closed_roads_geojson: string;
+  };
+  limitations_and_uncertainties: string[];
+}
+
+export interface SettlementConnectivity extends ConnectivitySummary {}
 
 export interface SituationReport {
+  report_id: string;
+  title: string;
   analysis_id: string;
   generated_at: string;
   language: 'en' | 'ne';
-  is_demo_fixture: boolean;
-  llm_grounded: boolean;
-  title: string;
-  executive_summary: string;
-  estimated_flood_extent: string;
-  infrastructure_impact: string;
-  settlement_isolation: string;
-  key_uncertainties_and_limitations: string;
-  provenance_and_citations: string;
+  generation_method: string;
+  provenance: string;
+  is_synthetic: boolean;
+  data_notice: string;
+  study_area: string;
+  bbox: number[];
+  event_date: string;
   disclaimer: string;
+  sections: {
+    executive_summary: string;
+    flood_extent_and_coverage: string;
+    infrastructure_exposure: string;
+    settlement_connectivity_and_isolation: string;
+    confidence_and_data_limitations: string;
+    recommended_next_steps: string;
+    data_attributions: string;
+  };
+  summary_metrics: {
+    candidate_flood_area_sqkm: number | null;
+    permanent_water_area_sqkm: number | null;
+    exposed_buildings_count: number | null;
+    exposed_road_length_km: number | null;
+    exposed_bridges_count: number | null;
+    critical_facilities_intersecting: number | null;
+    settlements_evaluated: number | null;
+    newly_disconnected_count: number | null;
+    already_disconnected_count: number | null;
+    detoured_count: number | null;
+  };
+}
+
+export interface ReportStatusResponse {
+  analysis_id: string;
+  input_readiness: {
+    flood_data: boolean;
+    infrastructure_data: boolean;
+    connectivity_data: boolean;
+    all_inputs_ready: boolean;
+  };
+  reports_available: {
+    en: boolean;
+    ne: boolean;
+  };
+  download_links: {
+    markdown_en: string;
+    markdown_ne: string;
+    pdf_en: string;
+    pdf_ne: string;
+  };
 }
